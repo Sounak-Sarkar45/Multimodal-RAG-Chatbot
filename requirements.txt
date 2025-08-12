@@ -35,7 +35,6 @@ torchaudio
 opencv-python
 layoutparser[layoutmodels,tesseract]
 python-magic
-python-magic-bin
 pytesseract
 
 # === Google Gemini API ===
