@@ -1,12 +1,11 @@
-import nltk
-nltk.data.path.append("nltk_data")  # Optional: custom path if you store it locally
-try:
-    nltk.data.find('tokenizers/punkt')
-    nltk.data.find('taggers/averaged_perceptron_tagger')
-except LookupError:
-    nltk.download('punkt')
-    nltk.download('averaged_perceptron_tagger')
-
+# import nltk
+# nltk.data.path.append("nltk_data")  # Optional: custom path if you store it locally
+# try:
+#     nltk.data.find('tokenizers/punkt')
+#     nltk.data.find('taggers/averaged_perceptron_tagger')
+# except LookupError:
+#     nltk.download('punkt')
+#     nltk.download('averaged_perceptron_tagger')
 import streamlit as st
 import os
 import uuid
