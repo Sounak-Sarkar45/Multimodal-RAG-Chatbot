@@ -1,0 +1,45 @@
+# === Core environment setup ===
+setuptools>=65.5.0
+pip>=23.0
+python-dotenv
+
+# === Streamlit app ===
+streamlit
+Pillow
+PyMuPDF
+
+# === LangChain core ===
+langchain
+langchain-core
+langchain-groq
+langchain-community
+fastembed
+
+# === Unstructured PDF parsing ===
+unstructured[local-inference]
+
+# === NLP and text processing ===
+nltk
+transformers
+pandas
+
+# === Vector database ===
+chromadb
+
+# === Machine learning / vision ===
+numpy>=1.23.0
+cython
+torch
+torchvision
+torchaudio
+opencv-python
+layoutparser[layoutmodels,tesseract]
+python-magic
+python-magic-bin
+pytesseract
+
+# === Google Gemini API ===
+google-generativeai
+
+# === Optional: Detectron2 (must be installed from source) ===
+# detectron2 @ git+https://github.com/facebookresearch/detectron2.git
