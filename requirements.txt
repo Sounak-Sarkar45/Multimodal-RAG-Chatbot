@@ -32,11 +32,8 @@ cython
 torch
 torchvision
 torchaudio
-# Use headless version for Linux to avoid libGL.so.1 error
-opencv-python-headless; sys_platform != "win32"
-opencv-python; sys_platform == "win32"
 layoutparser[layoutmodels,tesseract]
-# Use correct python-magic variant per OS
+# Force correct python-magic per OS
 python-magic; sys_platform != "win32"
 python-magic-bin; sys_platform == "win32"
 pytesseract
@@ -46,3 +43,7 @@ google-generativeai
 
 # === Optional: Detectron2 (must be installed from source) ===
 # detectron2 @ git+https://github.com/facebookresearch/detectron2.git
+
+# === Final override to avoid libGL.so.1 errors ===
+# This removes opencv-python if installed by dependencies and replaces with headless
+opencv-python-headless>=4.9.0.80
