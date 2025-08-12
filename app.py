@@ -1,3 +1,8 @@
+# Force Python to use the newer pysqlite3-binary package
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+
 import nltk
 nltk.data.path.append("nltk_data")  # Optional: custom path if you store it locally
 try:
