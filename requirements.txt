@@ -32,9 +32,13 @@ cython
 torch
 torchvision
 torchaudio
-opencv-python
+# Use headless version for Linux to avoid libGL.so.1 error
+opencv-python-headless; sys_platform != "win32"
+opencv-python; sys_platform == "win32"
 layoutparser[layoutmodels,tesseract]
-python-magic
+# Use correct python-magic variant per OS
+python-magic; sys_platform != "win32"
+python-magic-bin; sys_platform == "win32"
 pytesseract
 
 # === Google Gemini API ===
