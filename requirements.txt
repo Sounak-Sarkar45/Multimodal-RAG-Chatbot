@@ -47,3 +47,7 @@ google-generativeai
 # === Final override to avoid libGL.so.1 errors ===
 # This removes opencv-python if installed by dependencies and replaces with headless
 opencv-python-headless>=4.9.0.80
+
+# === Vector database ===
+chromadb
+pysqlite3-binary
