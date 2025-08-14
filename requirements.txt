@@ -51,3 +51,4 @@ opencv-python-headless>=4.9.0.80
 # === Vector database ===
 chromadb
 pysqlite3-binary
+tabulate
