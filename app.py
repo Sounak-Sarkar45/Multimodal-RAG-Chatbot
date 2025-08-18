@@ -1,7 +1,7 @@
 # Force Python to use the newer pysqlite3-binary package 
-__import__('pysqlite3')
-import sys
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+# __import__('pysqlite3')
+# import sys
+# sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 import nltk
 nltk.data.path.append("nltk_data")
@@ -31,6 +31,8 @@ from langchain.schema import Document
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import StrOutputParser
+from langchain.memory import ConversationBufferMemory
+from langchain.chains import ConversationalRetrievalChain
 from langchain_groq import ChatGroq
 from dotenv import load_dotenv
 from transformers import pipeline
@@ -220,6 +222,7 @@ def print_table(df, footnote=None, page_number=None, table_index=None):
 
 
 # --- Core Processing ---
+# --- Core Processing ---
 def process_pdf_and_create_retriever(uploaded_file):
     progress = st.progress(0, text="Starting PDF processing...")
     temp_path = "temp_uploaded.pdf"
@@ -239,11 +242,12 @@ def process_pdf_and_create_retriever(uploaded_file):
     text_elements = [el for el in elements if isinstance(el, UnstructuredText)]
     image_elements = [el for el in elements if isinstance(el, UnstructuredImage)]
 
-    # Step 2: Summarize text
-    progress.progress(40, text="Summarizing extracted text...")
+    # Step 2: Prepare text chunks
+    progress.progress(30, text="Splitting and summarizing text...")
     text_content = " ".join([el.text for el in text_elements if el.text and el.text.strip()])
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
     chunks = text_splitter.create_documents([text_content]) if text_content.strip() else []
+
     summarizer_pipeline = pipeline("summarization", model="t5-small")
     text_summaries = []
     for chunk in chunks:
@@ -260,14 +264,16 @@ def process_pdf_and_create_retriever(uploaded_file):
         except Exception as e:
             logger.warning(f"Text summarization error: {e}")
 
-    # Step 2.5: Extract tables from PDF
-    progress.progress(60, text="Extracting tables...")
+    # Step 2.5: Extract tables
+    progress.progress(50, text="Extracting tables...")
     all_table_docs = []
+    # Use the same LLM for table summarization
+    table_summaries = [] 
+    
     with pdfplumber.open(temp_path) as pdf:
         total_pages = len(pdf.pages)
-    
+
     pages_with_tables = [p for p in range(1, total_pages + 1) if page_has_table(temp_path, p)]
-    
     for page_num in pages_with_tables:
         tables_on_page = extract_tables_from_pdf(temp_path, page_num)
         for df, footnote, page, idx in tables_on_page:
@@ -276,10 +282,13 @@ def process_pdf_and_create_retriever(uploaded_file):
             if footnote:
                 table_text += f"\n\nFootnote: {footnote}"
             
-            all_table_docs.append(Document(page_content=table_text, metadata=metadata))
+            # Create a summary for the table using the LLM
+            table_summary = llm.invoke(f"Summarize the following table to make it searchable by questions about its content:\n\n{table_text}")
             
-            # Print table to terminal for debugging
-            print_table(df, footnote, page, idx)
+            all_table_docs.append(Document(page_content=table_text, metadata=metadata))
+            table_summaries.append(Document(page_content=table_summary.content, metadata=metadata))
+            
+            print_table(df, footnote, page, idx)  # Debug print
 
     # Step 3: Summarize images
     progress.progress(70, text="Summarizing extracted images...")
@@ -306,39 +315,50 @@ def process_pdf_and_create_retriever(uploaded_file):
     store = InMemoryStore()
     retriever = MultiVectorRetriever(vectorstore=vectorstore, docstore=store, id_key="doc_id")
 
+    # The following code is also updated to use the full documents for the docstore
+    # and the summary documents for the vectorstore search.
+
+    # ✅ Store raw text chunks
+    if chunks:
+        chunk_doc_ids = [str(uuid.uuid4()) for _ in chunks]
+        retriever.docstore.mset(list(zip(chunk_doc_ids, chunks)))
+        retriever.vectorstore.add_documents([
+            Document(page_content=chunk.page_content, metadata={"doc_id": chunk_doc_ids[i], "type": "raw_text"})
+            for i, chunk in enumerate(chunks)
+        ])
+
+    # ✅ Store text summaries
     if text_summaries:
         text_doc_ids = [str(uuid.uuid4()) for _ in text_summaries]
-        retriever.vectorstore.add_documents([
-            Document(page_content=s, metadata={"doc_id": text_doc_ids[i], "type": "text"})
-            for i, s in enumerate(text_summaries)
-        ])
-        retriever.docstore.mset(list(zip(text_doc_ids, chunks)))
+        summary_docs = [Document(page_content=s, metadata={"doc_id": text_doc_ids[i], "type": "summary"}) for i, s in enumerate(text_summaries)]
+        retriever.docstore.mset(list(zip(text_doc_ids, summary_docs)))
+        retriever.vectorstore.add_documents(summary_docs)
 
-    # Store all table markdown as searchable content
-    if all_table_docs:
+    # ✅ Store tables
+    if all_table_docs and table_summaries:
         table_doc_ids = [str(uuid.uuid4()) for _ in all_table_docs]
+        retriever.docstore.mset(list(zip(table_doc_ids, all_table_docs)))
         retriever.vectorstore.add_documents([
-            Document(
-                page_content=doc.page_content,  # Full table markdown
-                metadata={"doc_id": table_doc_ids[i], "type": "table", "page": doc.metadata["page"]}
-            )
-            for i, doc in enumerate(all_table_docs)
+            Document(page_content=s.page_content, metadata={"doc_id": table_doc_ids[i], "type": "table_summary", "page": s.metadata["page"]})
+            for i, s in enumerate(table_summaries)
         ])
-        retriever.docstore.mset(list(zip(table_doc_ids, [doc.page_content for doc in all_table_docs])))
-
-    # Store image summaries for retrieval but keep base64 for full context
+        
+    # ✅ Store images
     if image_summaries:
         image_doc_ids = [str(uuid.uuid4()) for _ in image_summaries]
-        retriever.vectorstore.add_documents([
+        image_docs_for_search = [
             Document(
                 page_content=s["summary"],
                 metadata={"doc_id": image_doc_ids[i], "type": "image", "page": s["page"]}
             )
             for i, s in enumerate(image_summaries)
-        ])
+        ]
+        retriever.vectorstore.add_documents(image_docs_for_search)
         retriever.docstore.mset(list(zip(image_doc_ids, img_base64_list)))
+        
+    vectorstore.persist()
 
-    # ✅ Always mark processing as complete
+    # ✅ Finalize
     progress.progress(100, text="Processing complete!")
     st.session_state.processed_flag = True
 
@@ -346,6 +366,20 @@ def process_pdf_and_create_retriever(uploaded_file):
         os.remove(temp_path)
 
     return retriever
+
+def conversational_rag_chain(retriever):
+    llm = get_llm()
+    # Explicitly set the output_key to 'answer'
+    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True, output_key="answer")
+
+    qa_chain = ConversationalRetrievalChain.from_llm(
+        llm=llm,
+        retriever=retriever,
+        memory=memory,
+        return_source_documents=True,
+        verbose=True
+    )
+    return qa_chain
 
 # --- RAG Chain ---
 def multi_modal_rag_chain(retriever):
@@ -400,12 +434,25 @@ uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
 
 if uploaded_file and not st.session_state.processed_flag:
     st.session_state.retriever = process_pdf_and_create_retriever(uploaded_file)
+    # Initialize the chain here after the retriever is ready
+    if "qa_chain" not in st.session_state:
+        st.session_state.qa_chain = conversational_rag_chain(st.session_state.retriever)
 
 if st.session_state.processed_flag:
     st.subheader("Ask a Question")
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+
     user_query = st.text_input("Enter your question:")
     if user_query and st.session_state.retriever:
         with st.spinner("Generating response..."):
-            chain = multi_modal_rag_chain(st.session_state.retriever)
-            response = chain.invoke(user_query)
-            st.markdown(f"**Response:** {response}")
+            # Use the existing chain from session state
+            response = st.session_state.qa_chain.invoke({"question": user_query, "chat_history": st.session_state.chat_history})
+            st.session_state.chat_history.append((user_query, response["answer"]))
+    
+    # Display the most recent chat instead of the full history
+    if st.session_state.chat_history:
+        # Access the last tuple in the list
+        q, a = st.session_state.chat_history[-1]
+        st.markdown(f"**You:** {q}")
+        st.markdown(f"**Bot:** {a}")
